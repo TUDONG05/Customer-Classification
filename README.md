@@ -1,4 +1,4 @@
-# Phân Khúc Khách Hàng — Customer Segmentation from Scratch
+# Phân Khúc Khách Hàng — Customer Segmentation 
 
 Triển khai thủ công ba thuật toán phân cụm  **K-Means**, **DBSCAN**, **Agglomerative Hierarchical** — trên bộ dữ liệu Mall Customers.
 
