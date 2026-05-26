@@ -63,7 +63,8 @@ customer-segmentation-scratch.ipynb
 │   ├── Class DBSCAN (from scratch)
 │   ├── k-distance graph (chọn eps)
 │   └── Kết quả eps=10, min_samples=3
-└── So sánh 3 thuật toán + Kết luận
+├── So sánh 3 thuật toán + Kết luận
+└── Biểu đồ 3D xoay được (Plotly) → xuất 3d_kmeans.html, 3d_agglomerative.html, 3d_dbscan.html
 ```
 
 ---
@@ -91,6 +92,90 @@ Kết quả tốt nhất trên Mall Customers: **K-Means k=5** (Annual Income ×
 
 ---
 
+## Bộ dữ liệu Online Retail II
+
+**online_retail_II.xlsx** — giao dịch thực tế của cửa hàng bán lẻ trực tuyến tại Anh, giai đoạn 01/12/2009 – 09/12/2011.
+
+| Cột | Mô tả |
+|-----|-------|
+| `Invoice` | Mã hóa đơn (bắt đầu bằng "C" = hóa đơn hủy) |
+| `StockCode` | Mã sản phẩm |
+| `Description` | Tên sản phẩm |
+| `Quantity` | Số lượng |
+| `InvoiceDate` | Ngày giờ hóa đơn |
+| `Price` | Đơn giá (£) |
+| `Customer ID` | Mã khách hàng (22.8% null) |
+| `Country` | Quốc gia |
+
+**Sau tiền xử lý:** 805,549 dòng — 5,878 khách hàng duy nhất.
+
+### Đặc trưng RFM
+
+Mỗi khách hàng được biểu diễn bằng 3 chỉ số RFM thay vì các cột giao dịch thô:
+
+| Đặc trưng | Ý nghĩa | Thống kê |
+|-----------|---------|---------|
+| **Recency (R)** | Số ngày kể từ lần mua cuối | TB: 201 ngày · max: 739 ngày |
+| **Frequency (F)** | Số hóa đơn khác nhau | TB: 6.3 · max: 398 |
+| **Monetary (M)** | Tổng doanh thu (£) | TB: £3,019 · max: £608,822 |
+
+Quy trình chuẩn hóa: **Log transform** (giảm skew) → **StandardScaler**.
+
+---
+
+## Kết quả thực nghiệm — Online Retail II
+
+### K-Means (k=4)
+
+Chọn k=4 qua Elbow Method + Silhouette Score.
+
+| Cụm | Recency (ngày) | Frequency | Monetary (£) | Số KH | % KH | Phân khúc |
+|-----|---------------|-----------|-------------|-------|------|-----------|
+| 0 | 27.4 | 19.3 | 11,014 | 1,188 | 20.2% | **VIP / Trung thành** |
+| 1 | 395.9 | 1.4 | 326 | 1,974 | 33.6% | **Không hoạt động** |
+| 2 | 227.9 | 5.1 | 2,002 | 1,465 | 24.9% | **Tiềm năng** |
+| 3 | 28.4 | 3.0 | 865 | 1,251 | 21.3% | **Khách mới** |
+
+> Silhouette = **0.3653** · Davies-Bouldin = **0.9303**
+
+### Agglomerative Hierarchical (Ward, k=4)
+
+Dendrogram (mẫu 300 KH) gợi ý ngưỡng cắt tại khoảng cách ≈ 6 → 4 cụm.
+
+| Cụm | Số KH |
+|-----|-------|
+| 0 | 1,831 |
+| 1 | 1,620 |
+| 2 | 1,472 |
+| 3 | 955 |
+
+> Silhouette = **0.3031** · Davies-Bouldin = **0.9584**
+
+### DBSCAN (eps tự động, min_samples=5)
+
+`eps` được chọn qua k-distance graph và grid search — ưu tiên eps lớn nhất còn tạo được ≥ 2 cụm với noise < 20%.
+
+| Chỉ số | Giá trị |
+|--------|---------|
+| Số cụm | 2 |
+| Điểm nhiễu | 21 (0.4%) |
+| Silhouette | **0.62** |
+| Davies-Bouldin | **0.34** |
+
+> DBSCAN cho Silhouette cao nhất và Davies-Bouldin thấp nhất, nhưng chỉ phân được 2 cụm — hữu ích để phát hiện khách hàng bất thường hơn là phân khúc chi tiết.
+
+### Tổng hợp so sánh (Online Retail II)
+
+| Thuật toán | Số cụm | Silhouette ↑ | Davies-Bouldin ↓ | Nhiễu |
+|------------|--------|-------------|-----------------|-------|
+| **K-Means** | 4 | 0.3653 | 0.9303 | 0 |
+| **Agglomerative** | 4 | 0.3031 | 0.9584 | 0 |
+| **DBSCAN** | 2 | **0.6200** | **0.3400** | 21 |
+
+**Nhận xét:** K-Means cho kết quả phân khúc kinh doanh rõ ràng nhất (4 nhóm có ý nghĩa). DBSCAN vượt trội về chỉ số mật độ nhưng chỉ tách được 2 nhóm lớn trên dữ liệu RFM.
+
+---
+
 ## Yêu cầu
 
 ```
@@ -100,12 +185,14 @@ matplotlib
 seaborn
 scikit-learn
 scipy
+plotly
+openpyxl
 ```
 
 Cài đặt:
 
 ```bash
-pip install numpy pandas matplotlib seaborn scikit-learn scipy
+pip install numpy pandas matplotlib seaborn scikit-learn scipy plotly openpyxl
 ```
 
 ---
@@ -113,5 +200,9 @@ pip install numpy pandas matplotlib seaborn scikit-learn scipy
 ## Chạy notebook
 
 ```bash
+# Mall Customers (from scratch)
 jupyter notebook customer-segmentation-scratch.ipynb
+
+# Online Retail II (sklearn)
+jupyter notebook online_retail_clustering_vi.ipynb
 ```
