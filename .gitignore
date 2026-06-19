@@ -1,0 +1,16 @@
+# Data files
+online_retail_II.xlsx
+
+# Jupyter Notebooks
+*.ipynb
+.ipynb_checkpoints/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment
+.env
+venv/
+.venv/
