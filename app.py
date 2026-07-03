@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import gradio as gr
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
-from sklearn.cluster import AgglomerativeClustering, DBSCAN
+from sklearn.cluster import AgglomerativeClustering, DBSCAN, KMeans as SKMeans
 import os
 BASE = os.path.dirname(os.path.abspath(__file__))
 MALL_PATH   = os.path.join(BASE, "Mall_Customers.csv")
@@ -172,8 +172,8 @@ class DBSCANScratch:
         return dbscan_predict_core(X, self._X_core, self._core_labels, self.eps)
 
 
-# Đặt tên cụm Mall
-def _name_mall(inc, sco, inc_med=61.5, sco_med=50.0):
+# Đặt tên cụm Mall — theo vị trí tâm cụm (đơn vị gốc) so với median toàn bộ
+def _name_mall(inc, sco, inc_med, sco_med):
     if abs(inc - inc_med) < 18 and abs(sco - sco_med) < 18:
         return "Khách hàng Ổn định"
     if inc < inc_med and sco < sco_med:
@@ -185,38 +185,77 @@ def _name_mall(inc, sco, inc_med=61.5, sco_med=50.0):
     return "Khách hàng Cao cấp"
 
 
-# Load & fit Mall models 
+def _disambiguate_names(name_map):
+    """_name_mall chỉ có 5 tên theo góc phần tư, nhưng số cụm thực tế (Agglomerative
+    K=3, DBSCAN K=7) có thể khác 5 → nhiều cụm rơi vào cùng góc phần tư sẽ trùng tên.
+    Đánh số thêm (1, 2, ...) cho các tên bị trùng để phân biệt, giống notebook."""
+    counts = {}
+    for name in name_map.values():
+        counts[name] = counts.get(name, 0) + 1
+    seen, result = {}, {}
+    for k, name in name_map.items():
+        if counts[name] > 1:
+            seen[name] = seen.get(name, 0) + 1
+            result[k] = f"{name} {seen[name]}"
+        else:
+            result[k] = name
+    return result
+
+
+# Load & fit Mall models
 print("Đang tải Mall_Customers và fit 3 mô hình...")
 _mall_df = pd.read_csv(MALL_PATH)
 X3       = _mall_df[["Annual Income (k$)", "Spending Score (1-100)"]].values
 
-_km_mall  = KMeans(n_clusters=5, random_state=42).fit(X3)
-_agg_mall = Agglomerative(n_clusters=5)
-_agg_mall.fit_predict(X3)
-_db_mall  = DBSCANScratch(eps=10, min_samples=3)
-_db_mall.fit_predict(X3)
+# Chuẩn hóa (StandardScaler) trước khi phân cụm — như notebook, tránh Annual Income
+# (thang chục) lấn át Spending Score (thang trăm) khi tính khoảng cách Euclidean.
+_mall_scaler = StandardScaler().fit(X3)
+X3_scaled    = _mall_scaler.transform(X3)
 
-# Tên cụm theo centroid
-_km_mall_names  = {k: _name_mall(*_km_mall.centroids_[k]) for k in range(5)}
-_agg_mall_names = {k: _name_mall(*_agg_mall.centroids_[k]) for k in range(5)}
-_db_mall_names  = {k: _name_mall(*_db_mall.centroids_[i]) for i, k in enumerate(_db_mall._cids)}
+_MALL_AGG_K  = 3     # K tự chọn từ dendrogram (notebook: distance_threshold=83.3664)
+_MALL_DB_EPS = 0.35  # trên dữ liệu đã chuẩn hóa (notebook)
+
+_km_mall = KMeans(n_clusters=5, random_state=42).fit(X3_scaled)
+
+_agg_mall        = Agglomerative(n_clusters=_MALL_AGG_K)
+_agg_mall_labels = _agg_mall.fit_predict(X3_scaled)
+
+_db_mall        = DBSCANScratch(eps=_MALL_DB_EPS, min_samples=3)
+_db_mall_labels = _db_mall.fit_predict(X3_scaled)
+
+# Tâm cụm ở đơn vị GỐC (income k$, score 1-100) chỉ dùng để đặt tên cho dễ diễn giải —
+# tách biệt với centroids_/core points nội bộ (đang ở không gian đã chuẩn hóa, dùng để predict).
+_inc_med, _sco_med = np.median(X3[:, 0]), np.median(X3[:, 1])
+
+_km_mall_raw_c  = {k: X3[_km_mall.labels_ == k].mean(axis=0) for k in range(5)}
+_agg_mall_raw_c = {k: X3[_agg_mall_labels == k].mean(axis=0) for k in np.unique(_agg_mall_labels)}
+_db_mall_raw_c  = {k: X3[_db_mall_labels == k].mean(axis=0) for k in _db_mall._cids}
+
+_km_mall_names  = _disambiguate_names({k: _name_mall(*c, _inc_med, _sco_med) for k, c in _km_mall_raw_c.items()})
+_agg_mall_names = _disambiguate_names({k: _name_mall(*c, _inc_med, _sco_med) for k, c in _agg_mall_raw_c.items()})
+_db_mall_names  = _disambiguate_names({k: _name_mall(*c, _inc_med, _sco_med) for k, c in _db_mall_raw_c.items()})
 
 print("  Mall models OK")
 
 
 def predict_mall(income: float, score: float, algo: str) -> str:
-    pt = np.array([[income, score]])
+    pt    = np.array([[income, score]])
+    pt_sc = _mall_scaler.transform(pt)
     if algo == "K-Means":
-        lbl  = int(_km_mall.predict(pt)[0])
+        lbl  = int(_km_mall.predict(pt_sc)[0])
         name = _km_mall_names.get(lbl, f"Cụm {lbl}")
     elif algo == "Agglomerative":
-        lbl  = int(_agg_mall.predict(pt)[0])
+        lbl  = int(_agg_mall.predict(pt_sc)[0])
         name = _agg_mall_names.get(lbl, f"Cụm {lbl}")
     else:  # DBSCAN
-        lbl  = int(_db_mall.predict(pt)[0])
+        lbl  = int(_db_mall.predict(pt_sc)[0])
         if lbl == -1:
             return "**Điểm ngoại lệ (Noise)**\n\nKhách hàng này không thuộc bất kỳ cụm nào — giá trị thu nhập hoặc chi tiêu quá khác biệt so với các nhóm đã học. DBSCAN không ép điểm vào cụm gần nhất như K-Means."
         name = _db_mall_names.get(lbl, f"Cụm {lbl}")
+
+    # tên có thể bị _disambiguate_names thêm hậu tố số (vd "Phổ thông 1") — tra mô tả theo tên gốc
+    desc_parts = name.rsplit(" ", 1)
+    desc_key   = desc_parts[0] if len(desc_parts) == 2 and desc_parts[1].isdigit() else name
 
     desc = {
         "Khách hàng Phổ thông":   "Thu nhập thấp, chi tiêu thấp — hạn chế tài chính.",
@@ -225,7 +264,7 @@ def predict_mall(income: float, score: float, algo: str) -> str:
         "Khách hàng Thận trọng":  "Thu nhập cao nhưng chi tiêu có chọn lọc.",
         "Khách hàng Cao cấp":     "Thu nhập cao, chi tiêu lớn — nhóm mục tiêu chiến lược.",
     }
-    return f"**{name}**\n\n{desc.get(name, '')}"
+    return f"**{name}**\n\n{desc.get(desc_key, '')}"
 
 
 
@@ -245,20 +284,21 @@ _rfm  = _retail.groupby("CustomerID").agg(
     Monetary  = ("Revenue",     "sum"),
 ).reset_index()
 
-# MinMaxScaler (KMeans + Agg) — log trước
-_rfm_log = _rfm[["Recency", "Frequency", "Monetary"]].copy()
-for c in ["Recency", "Frequency", "Monetary"]:
-    _rfm_log[c] = np.log1p(_rfm_log[c])
-_mm_scaler  = MinMaxScaler().fit(_rfm_log)
-X_mm        = _mm_scaler.transform(_rfm_log)
+# MinMaxScaler (KMeans + Agg) — trên RFM gốc, KHÔNG log (đúng như notebook)
+_mm_scaler  = MinMaxScaler().fit(_rfm[["Recency", "Frequency", "Monetary"]])
+X_mm        = _mm_scaler.transform(_rfm[["Recency", "Frequency", "Monetary"]])
 
-# StandardScaler (DBSCAN)
+# StandardScaler (DBSCAN) — trên RFM gốc
 _std_scaler = StandardScaler().fit(_rfm[["Recency", "Frequency", "Monetary"]])
 X_std       = _std_scaler.transform(_rfm[["Recency", "Frequency", "Monetary"]])
 
-# Fit sklearn models
-_km_rfm  = KMeans(n_clusters=3, random_state=42).fit(X_mm)
-_agg_rfm = AgglomerativeClustering(n_clusters=3, metric="euclidean", linkage="ward")
+# Fit models — K-Means dùng sklearn thật (k-means++, n_init=10) như notebook,
+# không phải class KMeans tự cài (chỉ dùng cho tab Mall Customers)
+_RFM_K = 3  # K_OPTIMAL từ Elbow (notebook)
+_AGG_K = 2  # AGG_CLUSTERS từ dendrogram (notebook, distance_threshold=15.8055)
+
+_km_rfm  = SKMeans(n_clusters=_RFM_K, init="k-means++", random_state=42, n_init=10).fit(X_mm)
+_agg_rfm = AgglomerativeClustering(n_clusters=_AGG_K, metric="euclidean", linkage="ward")
 _agg_rfm_labels = _agg_rfm.fit_predict(X_mm)
 _db_rfm  = DBSCAN(eps=0.3, min_samples=5).fit(X_std)
 
@@ -267,7 +307,7 @@ _rfm["_km"]  = _km_rfm.labels_
 _rfm["_agg"] = _agg_rfm_labels
 _rfm["_db"]  = _db_rfm.labels_
 
-_agg_centroids = np.array([X_mm[_agg_rfm_labels == k].mean(0) for k in range(3)])
+_agg_centroids = np.array([X_mm[_agg_rfm_labels == k].mean(0) for k in range(_AGG_K)])
 
 # DBSCAN: lưu core points để predict đúng bản chất (eps-reachability)
 _DB_EPS = 0.3
@@ -301,16 +341,15 @@ print("  Online Retail models OK")
 
 
 def predict_rfm(recency: float, frequency: float, monetary: float, algo: str) -> str:
-    raw  = pd.DataFrame([[recency, frequency, monetary]], columns=["Recency", "Frequency", "Monetary"])
-    log_ = np.log1p(raw.values)
-    pt_mm  = _mm_scaler.transform(log_)
+    raw    = pd.DataFrame([[recency, frequency, monetary]], columns=["Recency", "Frequency", "Monetary"])
+    pt_mm  = _mm_scaler.transform(raw.values)
     pt_std = _std_scaler.transform(raw.values)
 
     if algo == "K-Means":
         lbl  = int(_km_rfm.predict(pt_mm)[0])
         name = _km_rfm_names.get(lbl, f"Cụm {lbl}")
     elif algo == "Agglomerative":
-        lbl  = int(nearest_centroid_predict(_agg_centroids, list(range(3)), pt_mm)[0])
+        lbl  = int(nearest_centroid_predict(_agg_centroids, list(range(_AGG_K)), pt_mm)[0])
         name = _agg_rfm_names.get(lbl, f"Cụm {lbl}")
     else:  # DBSCAN
         lbl = int(dbscan_predict_core(pt_std, _db_X_core, _db_core_labels, _DB_EPS)[0])
