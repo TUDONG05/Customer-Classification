@@ -1,6 +1,6 @@
 # Customer Segmentation — Phân Khúc Khách Hàng
 
-> Phân tích và phân khúc khách hàng sử dụng **K-Means**, **DBSCAN** và **Agglomerative Hierarchical Clustering**, triển khai **từ đầu (from scratch)** bằng NumPy, áp dụng trên hai bộ dữ liệu thực tế.
+> Phân tích và phân khúc khách hàng sử dụng **K-Means**, **DBSCAN** và **Agglomerative Hierarchical Clustering**, triển khai bằng NumPy, áp dụng trên hai bộ dữ liệu Mall Customer và Retail Online .
 
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue?logo=python&logoColor=white)
 ![NumPy](https://img.shields.io/badge/NumPy-from--scratch-informational?logo=numpy)
